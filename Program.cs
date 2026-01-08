@@ -4,7 +4,7 @@ using Microsoft.Extensions.Hosting;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// CORS per permettere React su localhost:3000
+// CORS per permettere React e frontend su Vercel
 var MyAllowSpecificOrigins = "_myAllowSpecificOrigins";
 
 builder.Services.AddCors(options =>
@@ -13,7 +13,7 @@ builder.Services.AddCors(options =>
         policy =>
         {
             policy
-                .WithOrigins("http://localhost:3000")
+                .AllowAnyOrigin()
                 .AllowAnyHeader()
                 .AllowAnyMethod();
         });
@@ -21,6 +21,10 @@ builder.Services.AddCors(options =>
 
 // registra i controller
 builder.Services.AddControllers();
+
+// Configurazione server
+var port = Environment.GetEnvironmentVariable("PORT") ?? "5174";
+builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 
 var app = builder.Build();
 
