@@ -4,7 +4,7 @@ using Microsoft.Extensions.Hosting;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// CORS per permettere React e frontend su Vercel
+// CORS per permettere React e frontend
 var MyAllowSpecificOrigins = "_myAllowSpecificOrigins";
 
 builder.Services.AddCors(options =>
@@ -22,13 +22,13 @@ builder.Services.AddCors(options =>
 // registra i controller
 builder.Services.AddControllers();
 
-// Configurazione server
-var port = Environment.GetEnvironmentVariable("PORT") ?? "5174";
+// Configurazione server per Replit
+var port = Environment.GetEnvironmentVariable("PORT") ?? "5000";
 builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 
 var app = builder.Build();
 
-app.UseHttpsRedirection();
+// TOLTO: app.UseHttpsRedirection(); (non serve su Replit)
 
 // CORS prima di Authorization
 app.UseCors(MyAllowSpecificOrigins);
