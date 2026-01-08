@@ -1,13 +1,12 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
-WORKDIR /src
-COPY ["TaskApi.csproj", "./"]
-RUN dotnet restore
+WORKDIR /app
 COPY . .
-RUN dotnet build -c Release -o /app/build
+RUN dotnet restore TaskApi.csproj
+RUN dotnet publish -c Release -o out
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0
 WORKDIR /app
-COPY --from=build /app/build .
+COPY --from=build /app/out .
 EXPOSE 5000
 ENV ASPNETCORE_URLS=http://+:5000
 CMD ["dotnet", "TaskApi.dll"]
