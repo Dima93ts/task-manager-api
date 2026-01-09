@@ -1,86 +1,25 @@
-using Microsoft.AspNetCore.Mvc;
 using System.IdentityModel.Tokens.Jwt;
-using System.Security.Cryptography;
+using System.Security.Claims;
 using System.Text;
-using TaskApi.Models;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using TaskApi;
+using TaskApi.Models;
 
-namespace TaskApi.Controllers
+namespace TaskApi.Controllers;
+
+[ApiController]
+[Route("api/[controller]")]
+public class AuthController : ControllerBase
 {
-    [ApiController]
-    [Route("api/auth")]
-    public class AuthController : ControllerBase
+    private readonly AppDbContext _context;
+    private readonly IConfiguration _configuration;
+
+    public AuthController(AppDbContext context, IConfiguration configuration)
     {
-        private static readonly List<User> users = new();
-        private const string JwtKey = "your-secret-key-change-this-in-production-at-least-32-chars!";
-
-        [HttpPost("register")]
-        public ActionResult<AuthResponse> Register([FromBody] RegisterRequest req)
-        {
-            if (users.Any(u => u.Email == req.Email))
-                return BadRequest("Email already exists");
-
-            var user = new User
-            {
-                Email = req.Email,
-                Name = req.Name,
-                PasswordHash = HashPassword(req.Password),
-                CreatedAt = DateTime.UtcNow
-            };
-
-            // Auto-assign ID
-            user.Id = users.Count > 0 ? users.Max(u => u.Id) + 1 : 1;
-            users.Add(user);
-
-            var token = GenerateJwt(user.Id, user.Email);
-            return Ok(new AuthResponse { Token = token, UserId = user.Id, Email = user.Email });
-        }
-
-        [HttpPost("login")]
-        public ActionResult<AuthResponse> Login([FromBody] LoginRequest req)
-        {
-            var user = users.FirstOrDefault(u => u.Email == req.Email);
-            if (user == null || !VerifyPassword(req.Password, user.PasswordHash))
-                return Unauthorized("Invalid email or password");
-
-            var token = GenerateJwt(user.Id, user.Email);
-            return Ok(new AuthResponse { Token = token, UserId = user.Id, Email = user.Email });
-        }
-
-        private string GenerateJwt(int userId, string email)
-        {
-            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(JwtKey));
-            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
-            var token = new JwtSecurityToken(
-                issuer: "TaskApi",
-                audience: "TaskApiUsers",
-                claims: new[]
-                {
-                    new System.Security.Claims.Claim("sub", userId.ToString()),
-                    new System.Security.Claims.Claim("email", email)
-                },
-                expires: DateTime.UtcNow.AddDays(7),
-                signingCredentials: creds
-            );
-
-            return new JwtSecurityTokenHandler().WriteToken(token);
-        }
-
-        private string HashPassword(string password)
-        {
-            using (var sha256 = SHA256.Create())
-            {
-                var hash = sha256.ComputeHash(Encoding.UTF8.GetBytes(password));
-                return Convert.ToBase64String(hash);
-            }
-        }
-
-        private bool VerifyPassword(string password, string hash)
-        {
-            var hashOfInput = HashPassword(password);
-            return hashOfInput == hash;
-        }
+        _context = context;
+        _configuration = configuration;
     }
 
     public class RegisterRequest
@@ -96,10 +35,86 @@ namespace TaskApi.Controllers
         public string Password { get; set; } = string.Empty;
     }
 
-    public class AuthResponse
+    [HttpPost("register")]
+    public async Task<IActionResult> Register(RegisterRequest request)
     {
-        public string Token { get; set; } = string.Empty;
-        public int UserId { get; set; }
-        public string Email { get; set; } = string.Empty;
+        if (await _context.Users.AnyAsync(u => u.Email == request.Email))
+        {
+            return BadRequest(new { message = "Email già registrata" });
+        }
+
+        var passwordHash = BCrypt.Net.BCrypt.HashPassword(request.Password);
+
+        var user = new User
+        {
+            Email = request.Email,
+            PasswordHash = passwordHash,
+            Name = request.Name
+        };
+
+        _context.Users.Add(user);
+        await _context.SaveChangesAsync();
+
+        var token = GenerateJwtToken(user);
+
+        return Ok(new
+        {
+            token,
+            userId = user.Id,
+            email = user.Email,
+            name = user.Name
+        });
+    }
+
+    [HttpPost("login")]
+    public async Task<IActionResult> Login(LoginRequest request)
+    {
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == request.Email);
+        if (user == null)
+        {
+            return Unauthorized(new { message = "Credenziali non valide" });
+        }
+
+        var validPassword = BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash);
+        if (!validPassword)
+        {
+            return Unauthorized(new { message = "Credenziali non valide" });
+        }
+
+        var token = GenerateJwtToken(user);
+
+        return Ok(new
+        {
+            token,
+            userId = user.Id,
+            email = user.Email,
+            name = user.Name
+        });
+    }
+
+    private string GenerateJwtToken(User user)
+    {
+        var key = new SymmetricSecurityKey(
+            Encoding.UTF8.GetBytes(_configuration["Jwt:Key"]!)
+        );
+
+        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+        var claims = new[]
+        {
+            new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+            new Claim(JwtRegisteredClaimNames.Email, user.Email),
+            new Claim("name", user.Name)
+        };
+
+        var token = new JwtSecurityToken(
+            issuer: _configuration["Jwt:Issuer"],
+            audience: _configuration["Jwt:Audience"],
+            claims: claims,
+            expires: DateTime.UtcNow.AddDays(7),
+            signingCredentials: creds
+        );
+
+        return new JwtSecurityTokenHandler().WriteToken(token);
     }
 }
